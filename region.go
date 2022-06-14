@@ -4,23 +4,70 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/Tnze/go-mc/save/region"
-	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
 	"github.com/df-mc/dragonfly/server/world/mcdb"
+	"github.com/justtaldevelops/mcanvil/biomes"
+	"github.com/justtaldevelops/mcanvil/column"
+	"github.com/justtaldevelops/mcanvil/states"
 	"github.com/klauspost/compress/zlib"
 	"github.com/sandertv/gophertunnel/minecraft/nbt"
+	"math/bits"
 	"path"
 	"regexp"
 	"strconv"
 )
+
+// Chunk represents a 16x16x16 chunk of blocks. In Java, these are known as columns.
+type Chunk struct {
+	DataVersion   int32
+	XPos          int32            `nbt:"xPos"`
+	YPos          int32            `nbt:"yPos"`
+	ZPos          int32            `nbt:"zPos"`
+	BlockEntities []map[string]any `nbt:"block_entities"`
+	Structures    map[string]any   `nbt:"structures"`
+	Heightmaps    struct {
+		MotionBlocking         any `nbt:"MOTION_BLOCKING"`
+		MotionBlockingNoLeaves any `nbt:"MOTION_BLOCKING_NO_LEAVES"`
+		OceanFloor             any `nbt:"OCEAN_FLOOR"`
+		OceanFloorWg           any `nbt:"OCEAN_FLOOR_WG"`
+		WorldSurface           any `nbt:"WORLD_SURFACE"`
+		WorldSurfaceWg         any `nbt:"WORLD_SURFACE_WG"`
+	}
+	Sections       []SubChunk `nbt:"sections"`
+	Lights         any        `nbt:"Lights"`
+	Entities       any        `nbt:"entities"`
+	BlockTicks     any        `nbt:"block_ticks"`
+	FluidTicks     any        `nbt:"fluid_ticks"`
+	PostProcessing any
+	CarvingMasks   any
+	InhabitedTime  int64
+	IsLightOn      byte `nbt:"isLightOn"`
+	LastUpdate     int64
+	Status         string
+}
+
+// SubChunk represents a 16x16 sub-chunk of a chunk. In Java, these are known as chunks or sections.
+type SubChunk struct {
+	Y           byte
+	BlockStates struct {
+		Palette []states.Block `nbt:"palette"`
+		Data    []int64        `nbt:"data,omitempty"`
+	} `nbt:"block_states"`
+	Biomes struct {
+		Palette []string `nbt:"palette"`
+		Data    []int64  `nbt:"data,omitempty"`
+	} `nbt:"biomes"`
+	SkyLight   any `nbt:"SkyLight,omitempty"`
+	BlockLight any `nbt:"BlockLight,omitempty"`
+}
 
 // regionExp is a regular expression that matches the region file name.
 var regionExp = regexp.MustCompile(`^r\.(-?\d+)\.(-?\d+)\.mca$`)
 
 // Region is an extension of the go-mc region implementation.
 type Region struct {
-	raw *region.Region
+	raw  *region.Region
 	x, z int
 }
 
@@ -40,13 +87,12 @@ func LoadRegion(file string) (*Region, error) {
 }
 
 // Chunks returns a slice of maps representing encoded chunks in this region.
-func (r *Region) Chunks() ([]map[string]interface{}, error) {
-	chunks := make([]map[string]interface{}, 0)
-
-	boundX, boundZ := r.x << 5, r.z << 5
-	for chunkX := boundX; chunkX < boundX + 32; chunkX++ {
-		for chunkZ := boundZ; chunkZ < boundZ + 32; chunkZ++ {
-			c, err := r.raw.ReadSector(chunkX & 0x1f, chunkZ & 0x1f)
+func (r *Region) Chunks() ([]Chunk, error) {
+	chunks := make([]Chunk, 0, 1024)
+	boundX, boundZ := r.x<<5, r.z<<5
+	for chunkX := boundX; chunkX < boundX+32; chunkX++ {
+		for chunkZ := boundZ; chunkZ < boundZ+32; chunkZ++ {
+			c, err := r.raw.ReadSector(chunkX&0x1f, chunkZ&0x1f)
 			if err != nil {
 				continue
 			}
@@ -55,7 +101,7 @@ func (r *Region) Chunks() ([]map[string]interface{}, error) {
 				return nil, err
 			}
 
-			var data map[string]map[string]interface{}
+			var data Chunk
 			err = nbt.NewDecoderWithEncoding(z, nbt.BigEndian).Decode(&data)
 			if err != nil {
 				return nil, err
@@ -64,7 +110,7 @@ func (r *Region) Chunks() ([]map[string]interface{}, error) {
 			if err != nil {
 				return nil, err
 			}
-			chunks = append(chunks, data["Level"])
+			chunks = append(chunks, data)
 		}
 	}
 	return chunks, nil
@@ -74,74 +120,139 @@ func (r *Region) Chunks() ([]map[string]interface{}, error) {
 func (r *Region) WriteBedrock(prov *mcdb.Provider) error {
 	chunks, err := r.Chunks()
 	if err != nil {
-		return err
+		return fmt.Errorf("could not load chunk structures: %v", err)
 	}
 	air, ok := chunk.StateToRuntimeID("minecraft:air", nil)
 	if !ok {
 		return fmt.Errorf("could not find air runtime id")
 	}
 
-	for _, level := range chunks {
-		ch := chunk.New(air)
-		sections, biomes := level["Sections"].([]interface{}), level["Biomes"].([256]byte)
-		chunkX, chunkZ := int(level["xPos"].(int32)), int(level["zPos"].(int32))
-
-		offsetX, offsetZ := chunkX << 4, chunkZ << 4
-		for _, v := range sections {
-			section := v.(map[string]interface{})
-			if section["Add"] != nil {
-				return fmt.Errorf("add not nil but isn't implemented")
+	for _, c := range chunks {
+		ch := chunk.New(air, world.Overworld.Range())
+		offsetX, offsetZ := c.XPos<<4, c.ZPos<<4
+		for _, s := range c.Sections {
+			rawBlockPalette := make([]int32, 0, len(s.BlockStates.Palette))
+			for _, state := range s.BlockStates.Palette {
+				id, ok := states.JavaStateToID(state)
+				if !ok {
+					return fmt.Errorf("could not find block id for state %v", state)
+				}
+				rawBlockPalette = append(rawBlockPalette, id)
 			}
 
-			blocks, metadata := section["Blocks"].([4096]byte), section["Data"].([2048]byte)
-			offsetY := int(section["Y"].(byte)) << 4
+			n := int32(bits.Len(uint(len(rawBlockPalette) - 1)))
+			p, t := column.Palette(column.NewGlobalPalette()), column.ChunkPaletteType()
+			if n == 0 {
+				p = column.NewSingletonPalette(rawBlockPalette[0])
+			} else if n <= t.MinimumBitsPerEntry {
+				p, n = column.NewFilledListPalette(4, rawBlockPalette), 4
+			} else if n <= t.MaximumBitsPerEntry {
+				p = column.NewFilledMapPalette(n, rawBlockPalette)
+			}
 
-			for blockX := 0; blockX < 16; blockX++ {
-				for blockY := 0; blockY < 16; blockY++ {
-					for blockZ := 0; blockZ < 16; blockZ++ {
-						ind := blockY << 8 | blockZ << 4 | blockX
+			storage := column.NewEmptyBitStorage(n, 4096)
+			if len(s.BlockStates.Data) > 0 {
+				storage, err = column.NewFilledBitStorage(n, storage.Capacity(), s.BlockStates.Data)
+				if err != nil {
+					return err
+				}
+			}
 
-						block := fullBlock(ind, &blocks, &metadata)
-						if converted, ok := editionConversion[block]; ok {
-							block = converted
+			ind := int8(s.Y) - int8(c.YPos)
+			offsetY := ch.SubY(int16(ind))
+
+			sub := ch.Sub()[ind]
+			blocks := column.NewFilledDataPalette(t, n, p, storage)
+			for blockX := int32(0); blockX < 16; blockX++ {
+				for blockY := int32(0); blockY < 16; blockY++ {
+					for blockZ := int32(0); blockZ < 16; blockZ++ {
+						id, err := blocks.Get(column.BlockPos{blockX, blockY, blockZ})
+						if err != nil {
+							return err
+						}
+						if id == 0 {
+							// Skip air blocks.
+							continue
 						}
 
-						paletteBlock := conversion[block]
-						rid, ok := chunk.StateToRuntimeID(paletteBlock.name, paletteBlock.properties)
+						javaState, ok := states.IDToJavaState(id)
 						if !ok {
-							rid = air
+							return fmt.Errorf("could not find state for id: %d", id)
 						}
 
-						if block.id != 0 {
-							ch.SetRuntimeID(uint8(offsetX + blockX), int16(offsetY + blockY), uint8(offsetZ + blockZ), 0, rid)
+						bedrockState, ok := states.ConvertToBedrock(javaState)
+						if !ok {
+							return fmt.Errorf("could not find bedrock state for java state: %v", javaState)
+						}
+						rid, ok := chunk.StateToRuntimeID(bedrockState.Name, bedrockState.Properties)
+						if !ok {
+							return fmt.Errorf("could not find bedrock runtime id for state: %v", bedrockState)
+						}
+
+						sub.SetBlock(byte(blockX), byte(blockY), byte(blockZ), 0, rid)
+					}
+				}
+			}
+
+			rawBiomePalette := make([]int32, 0, len(s.Biomes.Palette))
+			for _, name := range s.Biomes.Palette {
+				id, ok := biomes.JavaNameToID(name)
+				if !ok {
+					return fmt.Errorf("could not find biome id for name: %v", name)
+				}
+				rawBiomePalette = append(rawBiomePalette, id)
+			}
+
+			n = int32(bits.Len(uint(len(rawBiomePalette) - 1)))
+			p, t = column.Palette(column.NewGlobalPalette()), column.BiomePaletteType()
+			if n == 0 {
+				p = column.NewSingletonPalette(rawBiomePalette[0])
+			} else if n <= t.MaximumBitsPerEntry {
+				p = column.NewFilledListPalette(n, rawBiomePalette)
+			}
+
+			storage = column.NewEmptyBitStorage(n, 64)
+			if len(s.Biomes.Data) > 0 {
+				storage, err = column.NewFilledBitStorage(n, storage.Capacity(), s.Biomes.Data)
+				if err != nil {
+					return err
+				}
+			}
+
+			for i := int32(0); i < 64; i++ {
+				id, err := storage.Get(i)
+				if err != nil {
+					return err
+				}
+				name, ok := biomes.IDToJavaName(id)
+				if !ok {
+					return fmt.Errorf("could not find biome name for id: %d", id)
+				}
+				bedrockID, ok := biomes.ConvertToBedrock(name)
+				if !ok {
+					return fmt.Errorf("could not find bedrock id for biome name: %v", name)
+				}
+
+				baseX := i & 3
+				baseY := (i >> 4) & 3
+				baseZ := (i >> 2) & 3
+
+				for blockX := baseX << 2; blockX < (baseX<<2)+4; blockX++ {
+					for blockZ := baseZ << 2; blockZ < (baseZ<<2)+4; blockZ++ {
+						for blockY := baseY << 2; blockY < (baseY<<2)+4; blockY++ {
+							ch.SetBiome(byte(offsetX+blockX), int16(blockY)+offsetY, byte(offsetZ+blockZ), bedrockID)
 						}
 					}
 				}
 			}
 		}
 
-		// Make our 2D biomes 3D.
-		for biomeX := 0; biomeX < 16; biomeX++ {
-			for biomeZ := 0; biomeZ < 16; biomeZ++ {
-				biomeID := biomes[(biomeX & 15) | (biomeZ & 15)<<4]
-				for biomeY := cube.MinY; biomeY <= cube.MaxY; biomeY++ {
-					ch.SetBiome(uint8(offsetX+biomeX), int16(biomeY), uint8(offsetZ+biomeZ), uint32(biomeID))
-				}
-			}
-		}
+		ch.Compact()
 
-		err = prov.SaveChunk(world.ChunkPos{int32(chunkX), int32(chunkZ)}, ch)
+		err = prov.SaveChunk(world.ChunkPos{c.XPos, c.ZPos}, ch, world.Overworld)
 		if err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// fullBlock returns an oldBlock from an index and a slice of blocks and metadata.
-func fullBlock(ind int, blocks *[4096]byte, metadata *[2048]byte) oldBlock {
-    return oldBlock{
-        id:       blocks[ind],
-        metadata: uint8(int(metadata[ind>> 1]) >> 4 * (ind & 1) & 15),
-    }
 }

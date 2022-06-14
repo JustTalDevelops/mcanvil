@@ -15,7 +15,7 @@ import (
 
 // Level represents a Minecraft level for the Anvil format.
 type Level struct {
-	dat map[string]interface{}
+	dat     map[string]any
 	regions []*Region
 }
 
@@ -29,11 +29,11 @@ func LoadLevel(folderPath string) (*Level, error) {
 		return nil, fmt.Errorf("regions not found in %s", folderPath)
 	}
 
-	var data map[string]map[string]interface{}
+	var data map[string]map[string]any
 	r, err := os.Open(datPath)
 	if err != nil {
-        return nil, err
-    }
+		return nil, err
+	}
 	z, err := gzip.NewReader(r)
 	if err != nil {
 		return nil, err
@@ -51,13 +51,13 @@ func LoadLevel(folderPath string) (*Level, error) {
 	}
 	for _, file := range regionFiles {
 		if regionExp.MatchString(file.Name()) {
-            regionPath := path.Join(regionsPath, file.Name())
-            region, err := LoadRegion(regionPath)
-            if err != nil {
-                return nil, err
-            }
-            level.regions = append(level.regions, region)
-        }
+			regionPath := path.Join(regionsPath, file.Name())
+			region, err := LoadRegion(regionPath)
+			if err != nil {
+				return nil, err
+			}
+			level.regions = append(level.regions, region)
+		}
 	}
 	return level, nil
 }
@@ -86,7 +86,7 @@ func (l *Level) WriteBedrock(prov *mcdb.Provider) error {
 			}
 			wg.Done()
 		}()
-    }
+	}
 	wg.Wait()
 	return nil
 }

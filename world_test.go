@@ -29,10 +29,8 @@ func TestWorld(t *testing.T) {
 		log.Fatalln(err)
 	}
 
-	for {
-		if _, err := srv.Accept(); err != nil {
-			return
-		}
+	for srv.Accept(nil) {
+		// Do nothing.
 	}
 }
 
