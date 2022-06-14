@@ -162,16 +162,16 @@ func (r *Region) WriteBedrock(prov *mcdb.Provider) error {
 			offsetY := ch.SubY(int16(ind))
 
 			sub := ch.Sub()[ind]
-			blocks := column.NewFilledDataPalette(t, n, p, storage)
+			dataPalette := column.NewFilledDataPalette(t, n, p, storage)
 			for blockX := int32(0); blockX < 16; blockX++ {
 				for blockY := int32(0); blockY < 16; blockY++ {
 					for blockZ := int32(0); blockZ < 16; blockZ++ {
-						id, err := blocks.Get(column.BlockPos{blockX, blockY, blockZ})
+						id, err := dataPalette.Get(column.BlockPos{blockX, blockY, blockZ})
 						if err != nil {
 							return err
 						}
 						if id == 0 {
-							// Skip air blocks.
+							// Skip air dataPalette.
 							continue
 						}
 
@@ -220,10 +220,11 @@ func (r *Region) WriteBedrock(prov *mcdb.Provider) error {
 			}
 
 			for i := int32(0); i < 64; i++ {
-				id, err := storage.Get(i)
+				paletteID, err := storage.Get(i)
 				if err != nil {
 					return err
 				}
+				id := p.IDToState(paletteID)
 				name, ok := biomes.IDToJavaName(id)
 				if !ok {
 					return fmt.Errorf("could not find biome name for id: %d", id)
