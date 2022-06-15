@@ -4,10 +4,9 @@ go 1.18
 
 require (
 	github.com/Tnze/go-mc v1.17.1
-	github.com/df-mc/dragonfly v0.7.3-0.20220612104050-8b29dc3fe843
+	github.com/df-mc/dragonfly v0.7.3-0.20220615055606-94848e589b7a
 	github.com/df-mc/goleveldb v1.1.9
 	github.com/klauspost/compress v1.15.1
-	github.com/kr/pretty v0.1.0
 	github.com/pelletier/go-toml v1.9.4
 	github.com/sandertv/gophertunnel v1.20.0
 	github.com/sirupsen/logrus v1.8.1
@@ -22,7 +21,6 @@ require (
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/uuid v1.3.0 // indirect
-	github.com/kr/text v0.1.0 // indirect
 	github.com/muhammadmuzzammil1998/jsonc v1.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.3.0 // indirect
 	github.com/sandertv/go-raknet v1.10.9 // indirect

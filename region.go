@@ -122,13 +122,21 @@ func (r *Region) WriteBedrock(prov *mcdb.Provider) error {
 	if err != nil {
 		return fmt.Errorf("could not load chunk structures: %v", err)
 	}
-	air, ok := chunk.StateToRuntimeID("minecraft:air", nil)
+	airRuntimeID, ok := chunk.StateToRuntimeID("minecraft:air", nil)
 	if !ok {
 		return fmt.Errorf("could not find air runtime id")
 	}
+	waterRuntimeID, ok := chunk.StateToRuntimeID("minecraft:water", map[string]any{"liquid_depth": int32(0)})
+	if !ok {
+		return fmt.Errorf("could not find water runtime id")
+	}
 
 	for _, c := range chunks {
-		ch := chunk.New(air, world.Overworld.Range())
+		if c.Status != "full" {
+			// Don't convert incomplete chunks, to be consistent with Bedrock.
+			continue
+		}
+		ch := chunk.New(airRuntimeID, world.Overworld.Range())
 		offsetX, offsetZ := c.XPos<<4, c.ZPos<<4
 		for _, s := range c.Sections {
 			rawBlockPalette := make([]int32, 0, len(s.BlockStates.Palette))
@@ -171,7 +179,7 @@ func (r *Region) WriteBedrock(prov *mcdb.Provider) error {
 							return err
 						}
 						if id == 0 {
-							// Skip air dataPalette.
+							// Skip airRuntimeID.
 							continue
 						}
 
@@ -180,7 +188,7 @@ func (r *Region) WriteBedrock(prov *mcdb.Provider) error {
 							return fmt.Errorf("could not find state for id: %d", id)
 						}
 
-						bedrockState, ok := states.ConvertToBedrock(javaState)
+						bedrockState, waterlogged, ok := states.ConvertToBedrock(javaState)
 						if !ok {
 							return fmt.Errorf("could not find bedrock state for java state: %v", javaState)
 						}
@@ -190,6 +198,9 @@ func (r *Region) WriteBedrock(prov *mcdb.Provider) error {
 						}
 
 						sub.SetBlock(byte(blockX), byte(blockY), byte(blockZ), 0, rid)
+						if waterlogged {
+							sub.SetBlock(byte(blockX), byte(blockY), byte(blockZ), 1, waterRuntimeID)
+						}
 					}
 				}
 			}
@@ -219,7 +230,7 @@ func (r *Region) WriteBedrock(prov *mcdb.Provider) error {
 				}
 			}
 
-			for i := int32(0); i < 64; i++ {
+			for i := int32(0); i < storage.Capacity(); i++ {
 				paletteID, err := storage.Get(i)
 				if err != nil {
 					return err

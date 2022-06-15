@@ -16,18 +16,25 @@ var (
 	idToJavaState = make(map[int32]Block)
 	// javaStateToID is a map between a Java state and a Java state ID.
 	javaStateToID = make(map[blockHash]int32)
+	// waterloggedBlocks is a set of all waterlogged Java block IDs.
+	waterloggedBlocks = make(map[blockHash]struct{})
 )
 
 func init() {
 	parsedData := gjson.ParseBytes(blockMappingData)
 	parsedData.ForEach(func(key, value gjson.Result) bool {
-		bedrockState := parseBedrockBlockJSON(value.String())
-		javaState := parseJavaCompressedBlock(key.String())
+		k, v := key.String(), value.String()
+		bedrockState := parseBedrockBlockJSON(v)
+		javaState := parseJavaCompressedBlock(k)
 		id := int32(len(idToJavaState))
+		h := hashBlock(javaState)
 
-		javaToBedrockState[hashBlock(javaState)] = bedrockState
-		javaStateToID[hashBlock(javaState)] = id
+		javaToBedrockState[h] = bedrockState
+		javaStateToID[h] = id
 		idToJavaState[id] = javaState
+		if javaState.Name == "minecraft:bubble_column" || javaState.Name == "minecraft:kelp" || strings.Contains(k, "waterlogged=true") || strings.Contains(k, "seagrass") {
+			waterloggedBlocks[h] = struct{}{}
+		}
 		return true
 	})
 }
@@ -44,10 +51,12 @@ func JavaStateToID(state Block) (int32, bool) {
 	return id, ok
 }
 
-// ConvertToBedrock converts a Java state to a Bedrock state.
-func ConvertToBedrock(state Block) (Block, bool) {
-	converted, ok := javaToBedrockState[hashBlock(state)]
-	return converted, ok
+// ConvertToBedrock converts a Java state to a Bedrock state. The second boolean is true if the state is waterlogged.
+func ConvertToBedrock(state Block) (Block, bool, bool) {
+	h := hashBlock(state)
+	converted, ok := javaToBedrockState[h]
+	_, waterlogged := waterloggedBlocks[h]
+	return converted, waterlogged, ok
 }
 
 // parseBedrockBlockJSON parses a JSON block state string and returns a Block.
