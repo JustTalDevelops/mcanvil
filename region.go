@@ -178,14 +178,13 @@ func (r *Region) WriteBedrock(prov *mcdb.Provider) error {
 						if err != nil {
 							return err
 						}
-						if id == 0 {
-							// Skip airRuntimeID.
-							continue
-						}
-
 						javaState, ok := states.IDToJavaState(id)
 						if !ok {
 							return fmt.Errorf("could not find state for id: %d", id)
+						}
+						if javaState.Name == "minecraft:air" {
+							// Chunks are already prefilled with air.
+							continue
 						}
 
 						bedrockState, waterlogged, ok := states.ConvertToBedrock(javaState)
@@ -240,6 +239,11 @@ func (r *Region) WriteBedrock(prov *mcdb.Provider) error {
 				if !ok {
 					return fmt.Errorf("could not find biome name for id: %d", id)
 				}
+				if name == "minecraft:ocean" {
+					// Chunks use the ocean biome by default.
+					continue
+				}
+
 				bedrockID, ok := biomes.ConvertToBedrock(name)
 				if !ok {
 					return fmt.Errorf("could not find bedrock id for biome name: %v", name)
