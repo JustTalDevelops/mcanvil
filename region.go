@@ -117,7 +117,7 @@ func (r *Region) Chunks() ([]Chunk, error) {
 }
 
 // WriteBedrock converts and writes a region file to a Bedrock world provider.
-func (r *Region) WriteBedrock(prov *mcdb.Provider) error {
+func (r *Region) WriteBedrock(prov *mcdb.DB) error {
 	chunks, err := r.Chunks()
 	if err != nil {
 		return fmt.Errorf("could not load chunk structures: %v", err)
@@ -264,8 +264,11 @@ func (r *Region) WriteBedrock(prov *mcdb.Provider) error {
 		}
 
 		ch.Compact()
+		col := &world.Column{
+			Chunk: ch,
+		}
 
-		err = prov.SaveChunk(world.ChunkPos{c.XPos, c.ZPos}, ch, world.Overworld)
+		err = prov.StoreColumn(world.ChunkPos{c.XPos, c.ZPos}, world.Overworld, col)
 		if err != nil {
 			return err
 		}

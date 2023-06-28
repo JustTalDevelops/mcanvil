@@ -22,12 +22,15 @@ func TestWorld(t *testing.T) {
 	if err != nil {
 		log.Fatalln(err)
 	}
-
-	srv := server.New(&config, log)
-	srv.CloseOnProgramEnd()
-	if err := srv.Start(); err != nil {
+	conf, err := config.Config(log)
+	if err != nil {
 		log.Fatalln(err)
 	}
+
+	srv := conf.New()
+	srv.CloseOnProgramEnd()
+
+	srv.Listen()
 
 	for srv.Accept(nil) {
 		// Do nothing.
@@ -35,7 +38,7 @@ func TestWorld(t *testing.T) {
 }
 
 // readConfig reads the configuration from the config.toml file, or creates the file if it does not yet exist.
-func readConfig() (server.Config, error) {
+func readConfig() (server.UserConfig, error) {
 	c := server.DefaultConfig()
 	if _, err := os.Stat("config.toml"); os.IsNotExist(err) {
 		data, err := toml.Marshal(c)

@@ -2,7 +2,6 @@ package mcanvil
 
 import (
 	"github.com/df-mc/dragonfly/server/world/mcdb"
-	"github.com/df-mc/goleveldb/leveldb/opt"
 	"testing"
 )
 
@@ -11,7 +10,7 @@ func TestLevel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prov, err := mcdb.New("world/", opt.FlateCompression)
+	prov, err := mcdb.Open("world/")
 	if err != nil {
 		t.Fatal(err)
 	}

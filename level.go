@@ -63,7 +63,7 @@ func LoadLevel(folderPath string) (*Level, error) {
 }
 
 // WriteBedrock converts and writes an anvil level to a Bedrock world provider.
-func (l *Level) WriteBedrock(prov *mcdb.Provider) error {
+func (l *Level) WriteBedrock(prov *mcdb.DB) error {
 	settings := prov.Settings()
 	settings.Name = l.dat["LevelName"].(string)
 	settings.Time = l.dat["DayTime"].(int64)
